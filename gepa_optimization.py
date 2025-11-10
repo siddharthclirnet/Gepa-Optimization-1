@@ -1,3 +1,170 @@
+# -*- coding: utf-8 -*-
+
+
+
+"""
+GEPA Optimization for PAN Card Extraction using New DSPy GEPA Syntax
+"""
+
+import dspy
+from dspy import GEPA
+from dspy.evaluate import Evaluate
+from gemma_adapter import GemmaAdapter
+from evaluate_test_all_pan import (
+    load_complete_dataset, 
+    metric_with_feedback, 
+    GemmaPANExtractor,
+    PANCardExtraction
+)
+
+# Configure DSPy with Gemma
+lmset = dspy.LM(
+    model="openai/gpt-5-mini",  
+    api_key="sk-b01398251e67d59f8322ffca84db8779365920c93efa7e72035b5a26fb2cfa54",  # OpenRouter key
+    api_base="https://openrouter.ai/api/v1",  
+    
+    temperature=1.0,
+    max_tokens=16000,
+    cache=False,
+)
+dspy.settings.configure(lm=lmset, adapter=GemmaAdapter())
+
+def run_gepa_optimization_new():
+    """Run GEPA optimization using the new DSPy GEPA syntax"""
+    
+    print("=" * 70)
+    print("🚀 GEPA Optimization for PAN Card Extraction (New Syntax)")
+    print("=" * 70)
+    
+    # 1. Load dataset
+    print("\n📋 Step 1: Loading Dataset")
+    all_examples = load_complete_dataset()
+    
+    if not all_examples:
+        raise ValueError("❌ No data loaded from dataset")
+    
+    # Split dataset (80% train, 20% dev)
+    split_idx = int(len(all_examples) * 0.8)
+    trainset, devset = all_examples[:split_idx], all_examples[split_idx:]
+    
+    print(f"✅ Dataset loaded: {len(trainset)} train, {len(devset)} dev examples")
+    
+    # 2. Define the base program
+    print("\n📋 Step 2: Defining Base Program")
+    base_program = GemmaPANExtractor()
+    print("✅ Base program created")
+    
+    # 3. Define GEPA-friendly metric with feedback
+    def gepa_metric_with_feedback(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        score = metric_with_feedback(example, prediction)
+        feedback = f"Score: {score:.3f}" if score > 0.7 else f"Low score: {score:.3f}, needs improvement"
+        return dspy.Prediction(score=score, feedback=feedback)
+    
+    print("✅ GEPA metric configured")
+    
+    # 4. Optimize with GEPA
+    print("\n📋 Step 3: Configuring GEPA Optimization")
+    
+    gepa_optimizer = GEPA(
+        metric=gepa_metric_with_feedback,
+        reflection_lm=lmset,  # Use the same Gemma model for reflection
+        #auto="light",      # Light optimization mode
+        max_metric_calls=32     
+    )
+    
+    print("✅ GEPA optimizer configured")
+    
+    # 5. Run GEPA compilation
+    print("\n" + "=" * 70)
+    print("🚀 Starting GEPA Optimization...")
+    print("=" * 70)
+    print(f"Training on {len(trainset)} examples, validating on {len(devset)} examples")
+    print("⏳ This may take a while...\n")
+    
+    try:
+        optimized_program = gepa_optimizer.compile(
+            student=base_program,
+            trainset=trainset,
+            valset=devset
+        )
+        
+        print("\n" + "=" * 70)
+        print("✅ GEPA Optimization Complete!")
+        print("=" * 70)
+        
+        return optimized_program, base_program, devset
+        
+    except Exception as e:
+        print(f"\n❌ GEPA optimization failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+def evaluate_optimized_program(optimized_program, base_program, devset):
+    """Evaluate both base and optimized programs"""
+    print("\n" + "=" * 70)
+    print("📊 Evaluating Programs")
+    print("=" * 70)
+    
+    # Evaluate base program
+    print("\n🔍 Evaluating Base Program...")
+    base_evaluator = Evaluate(devset=devset, metric=metric_with_feedback, display_progress=True, display_table=3)
+    base_result = base_evaluator(base_program)
+    
+    # Evaluate optimized program  
+    print("\n🔍 Evaluating Optimized Program...")
+    optimized_evaluator = Evaluate(devset=devset, metric=metric_with_feedback, display_progress=True, display_table=3)
+    optimized_result = optimized_evaluator(optimized_program)
+    
+    # Display comparison
+    print("\n" + "=" * 70)
+    print("📈 PERFORMANCE COMPARISON")
+    print("=" * 70)
+    print(f"Base Program Score:     {base_result.score:.3f}")
+    print(f"Optimized Program Score: {optimized_result.score:.3f}")
+    print(f"Improvement:            {optimized_result.score - base_result.score:+.3f}")
+    
+    return base_result.score, optimized_result.score
+
+def main():
+    """Main execution function"""
+    try:
+        # Run GEPA optimization
+        optimized_program, base_program, devset = run_gepa_optimization_new()
+        
+        # Evaluate both programs
+        base_score, optimized_score = evaluate_optimized_program(optimized_program, base_program, devset)
+        optimized_prompt = optimized_program.extract.signature.__doc__
+
+        # Final results
+        print("\n" + "=" * 70)
+        print("🎉 GEPA OPTIMIZATION COMPLETE!")
+        print("=" * 70)
+        print(f"📊 Final Results:")
+        print(f"   - Base Model:      {base_score:.3f}")
+        print(f"   - Optimized Model: {optimized_score:.3f}")
+        print(f"   - Improvement:     {optimized_score - base_score:+.3f}")
+        
+        if optimized_score > base_score:
+            print("   ✅ Optimization successful!")
+        else:
+            print("   ⚠️  No improvement achieved")
+
+        print("🎯 FINAL OPTIMIZED PROMPT FROM GEPA:")
+        print("=" * 70)
+        print(optimized_prompt)
+        print("=" * 70)
+    except Exception as e:
+        print(f"\n❌ Optimization failed: {e}")
+        return 1
+    
+    return 0
+
+if __name__ == "__main__":
+    exit(main())
+
+
+
 # # -*- coding: utf-8 -*-
 # """
 # Final GEPA Optimization for PAN Card Extraction using DSPy
@@ -338,169 +505,3 @@
 #     print("  ✅ Uses your exact evaluation metric and dataset")
 #     print("  ✅ Optimizes PAN card extraction instructions")
 #     print("  ✅ Maintains compatibility with your existing code")
-
-# -*- coding: utf-8 -*-
-
-
-
-"""
-GEPA Optimization for PAN Card Extraction using New DSPy GEPA Syntax
-"""
-
-import dspy
-from dspy import GEPA
-from dspy.evaluate import Evaluate
-from gemma_adapter import GemmaAdapter
-from evaluate_test_all_pan import (
-    load_complete_dataset, 
-    metric_with_feedback, 
-    GemmaPANExtractor,
-    PANCardExtraction
-)
-
-# Configure DSPy with Gemma
-lmset = dspy.LM(
-    model="openai/gpt-5-mini",  
-    api_key="sk-b01398251e67d59f8322ffca84db8779365920c93efa7e72035b5a26fb2cfa54",  # OpenRouter key
-    api_base="https://openrouter.ai/api/v1",  
-    
-    temperature=1.0,
-    max_tokens=16000,
-    cache=False,
-)
-dspy.settings.configure(lm=lmset, adapter=GemmaAdapter())
-
-def run_gepa_optimization_new():
-    """Run GEPA optimization using the new DSPy GEPA syntax"""
-    
-    print("=" * 70)
-    print("🚀 GEPA Optimization for PAN Card Extraction (New Syntax)")
-    print("=" * 70)
-    
-    # 1. Load dataset
-    print("\n📋 Step 1: Loading Dataset")
-    all_examples = load_complete_dataset()
-    
-    if not all_examples:
-        raise ValueError("❌ No data loaded from dataset")
-    
-    # Split dataset (80% train, 20% dev)
-    split_idx = int(len(all_examples) * 0.8)
-    trainset, devset = all_examples[:split_idx], all_examples[split_idx:]
-    
-    print(f"✅ Dataset loaded: {len(trainset)} train, {len(devset)} dev examples")
-    
-    # 2. Define the base program
-    print("\n📋 Step 2: Defining Base Program")
-    base_program = GemmaPANExtractor()
-    print("✅ Base program created")
-    
-    # 3. Define GEPA-friendly metric with feedback
-    def gepa_metric_with_feedback(example, prediction, trace=None, pred_name=None, pred_trace=None):
-        score = metric_with_feedback(example, prediction)
-        feedback = f"Score: {score:.3f}" if score > 0.7 else f"Low score: {score:.3f}, needs improvement"
-        return dspy.Prediction(score=score, feedback=feedback)
-    
-    print("✅ GEPA metric configured")
-    
-    # 4. Optimize with GEPA
-    print("\n📋 Step 3: Configuring GEPA Optimization")
-    
-    gepa_optimizer = GEPA(
-        metric=gepa_metric_with_feedback,
-        reflection_lm=lmset,  # Use the same Gemma model for reflection
-        #auto="light",      # Light optimization mode
-        max_metric_calls=32     
-    )
-    
-    print("✅ GEPA optimizer configured")
-    
-    # 5. Run GEPA compilation
-    print("\n" + "=" * 70)
-    print("🚀 Starting GEPA Optimization...")
-    print("=" * 70)
-    print(f"Training on {len(trainset)} examples, validating on {len(devset)} examples")
-    print("⏳ This may take a while...\n")
-    
-    try:
-        optimized_program = gepa_optimizer.compile(
-            student=base_program,
-            trainset=trainset,
-            valset=devset
-        )
-        
-        print("\n" + "=" * 70)
-        print("✅ GEPA Optimization Complete!")
-        print("=" * 70)
-        
-        return optimized_program, base_program, devset
-        
-    except Exception as e:
-        print(f"\n❌ GEPA optimization failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-def evaluate_optimized_program(optimized_program, base_program, devset):
-    """Evaluate both base and optimized programs"""
-    print("\n" + "=" * 70)
-    print("📊 Evaluating Programs")
-    print("=" * 70)
-    
-    # Evaluate base program
-    print("\n🔍 Evaluating Base Program...")
-    base_evaluator = Evaluate(devset=devset, metric=metric_with_feedback, display_progress=True, display_table=3)
-    base_result = base_evaluator(base_program)
-    
-    # Evaluate optimized program  
-    print("\n🔍 Evaluating Optimized Program...")
-    optimized_evaluator = Evaluate(devset=devset, metric=metric_with_feedback, display_progress=True, display_table=3)
-    optimized_result = optimized_evaluator(optimized_program)
-    
-    # Display comparison
-    print("\n" + "=" * 70)
-    print("📈 PERFORMANCE COMPARISON")
-    print("=" * 70)
-    print(f"Base Program Score:     {base_result.score:.3f}")
-    print(f"Optimized Program Score: {optimized_result.score:.3f}")
-    print(f"Improvement:            {optimized_result.score - base_result.score:+.3f}")
-    
-    return base_result.score, optimized_result.score
-
-def main():
-    """Main execution function"""
-    try:
-        # Run GEPA optimization
-        optimized_program, base_program, devset = run_gepa_optimization_new()
-        
-        # Evaluate both programs
-        base_score, optimized_score = evaluate_optimized_program(optimized_program, base_program, devset)
-        optimized_prompt = optimized_program.extract.signature.__doc__
-
-        # Final results
-        print("\n" + "=" * 70)
-        print("🎉 GEPA OPTIMIZATION COMPLETE!")
-        print("=" * 70)
-        print(f"📊 Final Results:")
-        print(f"   - Base Model:      {base_score:.3f}")
-        print(f"   - Optimized Model: {optimized_score:.3f}")
-        print(f"   - Improvement:     {optimized_score - base_score:+.3f}")
-        
-        if optimized_score > base_score:
-            print("   ✅ Optimization successful!")
-        else:
-            print("   ⚠️  No improvement achieved")
-
-        print("🎯 FINAL OPTIMIZED PROMPT FROM GEPA:")
-        print("=" * 70)
-        print(optimized_prompt)
-        print("=" * 70)
-    except Exception as e:
-        print(f"\n❌ Optimization failed: {e}")
-        return 1
-    
-    return 0
-
-if __name__ == "__main__":
-    exit(main())
-
